@@ -13,6 +13,8 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <map>
+#include <sys/resource.h>
+#include <sys/time.h>
 using namespace std;
 //COLORS:
 #define GREEN_BOLD   "\x1b[1;32m"
@@ -29,7 +31,7 @@ using namespace std;
 //RUN
 #define RUN_PROCESSES
 
-map<string, void (*)(vector<string>&)> Microsha_functions;
+map<string, void (*)(string*, int)> Microsha_functions;
 
 void greeting(bool sudoflag){
     char dir[4096];
@@ -105,13 +107,15 @@ void string_to_words1(string& s, vector<string>& t){
     if (!w.empty()) {w.push_back(0); expand_links(w, t);}
 }
 int parce(vector<string>& t, vector<vector<string>>& v, string& input_filename, string& output_filename,
- bool& input_flag, bool& output_flag){
+ bool& input_flag, bool& output_flag, bool& time_flag){
     int j=0;
-    input_flag = output_flag = false;
+    time_flag = input_flag = output_flag = false;
+    int i=0;
+    if (!t.empty() && !t[0].empty() && strcmp(&t[0][0], "time") == 0) {++i; time_flag = true;}
     vector<string> p;
     v.push_back(p);
     bool conveyer_flag=false;
-    for (int i=0, n=t.size(); i<n; ++i){
+    for (int n=t.size(); i<n; ++i){
         if (strcmp(&t[i][0], "|") == 0) {
             if (output_flag) return -1;
             ++j; v.push_back(p); conveyer_flag = true; continue;
@@ -147,21 +151,21 @@ int parce(vector<string>& t, vector<vector<string>>& v, string& input_filename, 
     return 0;
 } 
 
-void cd_f(vector<string>& t){
+void cd_f(string* t, int n){
     //fprintf(stderr, "I'm cd_f\n");
-    if (t.size()==1){
+    if (n==1){
         char home[] = "HOME";
         chdir(getenv(home));
         return;
     }
-    if (t.size()==2){
+    if (n==2){
         if (chdir(&t[1][0])<0) perror("");
         return;
     }
     fprintf(stderr, "cd: invalid argument\n");
 }
-void pwd_f(vector<string>& t){
-        if (t.size()==1){
+void pwd_f(string* t, int n){
+        if (n==1){
         char dir[4096];
         getcwd(dir, 4096);
         printf("%s\n", dir);
@@ -169,20 +173,17 @@ void pwd_f(vector<string>& t){
     }
     fprintf(stderr, "pwd: invalid argument\n");
 }
-void time_f(vector<string>& t){
-
-}
-void echo_f(vector<string>& t){
-    for(int n = t.size(), i=1; i<n; ++i)
+void echo_f(string* t, int n){
+    for(int i=1; i<n; ++i)
         printf("%s ", &t[i][0]);
     printf("\n");
 }
-void set_f(vector<string>& t){
-    if (t.size()>2){
+void set_f(string* t, int n){
+    if (n>2){
         fprintf(stderr, "set: invalid argument\n");
         return;
     }
-    if (t.size()<2 || t[1].empty()) return;
+    if (n<2 || t[1].empty()) return;
     bool f=false;
     char* val = &t[1][0], *name=val;
     for(;*val!=0;++val)
@@ -195,15 +196,53 @@ void set_f(vector<string>& t){
     //printf("name= %s, val = %s\n", name, val);
     if(setenv(name, val, 1)<0) perror("");
 }
-void run_exec(vector<string>& t){
-    const int n = t.size();
+void run_exec(string* t, int n){
     char **args = new char*[n+1];
-    for (int i=0; i<n; ++i) 
+    for (int i=0; i<n; ++i)
         args[i] = &t[i][0];
     args[n] = NULL;
     execvp(args[0], args);
     perror("");
     delete[] args;
+}
+void timediff(timeval tv1, timeval tv2, timeval& dtv){
+    dtv.tv_sec= tv2.tv_sec -tv1.tv_sec;
+    dtv.tv_usec=tv2.tv_usec-tv1.tv_usec;
+    if(dtv.tv_usec<0) {--dtv.tv_sec; dtv.tv_usec+=1000000; }
+}
+void timeprint(timeval dtv, rusage buf){
+    printf("real\t%ldm%01ld,%03lds\nuser\t%ldm%01ld,%03lds\nsys\t%ldm%01ld,%03lds\n", dtv.tv_sec/60, dtv.tv_sec%60, dtv.tv_usec/1000,
+     buf.ru_utime.tv_sec/60, buf.ru_utime.tv_sec%60, buf.ru_utime.tv_usec/1000,
+     buf.ru_stime.tv_sec/60, buf.ru_stime.tv_sec%60, buf.ru_stime.tv_usec/1000);
+}
+void run_process(string*, int);
+void time_f(string* t, int n){
+    timeval tv1, tv2, dtv;
+    struct timezone tz;
+    gettimeofday(&tv1, &tz);
+    pid_t pid = fork();
+    if (pid == 0){
+        ++t; --n;
+        run_process(t, n);
+        exit(0);
+    }
+    else{
+        waitpid(pid, NULL, WUNTRACED);
+        gettimeofday(&tv2, &tz);
+        rusage buf;
+        if (getrusage(RUSAGE_CHILDREN, &buf)<0) perror("getrusage");
+        timediff(tv1, tv2, dtv);
+        timeprint(dtv, buf);
+    }
+}
+
+void run_process(string* t, int n){
+    if(n==0) return;
+    #ifdef RUN_PROCESSES
+    auto it = Microsha_functions.find(t[0]);
+    if (it == Microsha_functions.end()) run_exec(&t[0], n);
+    else it->second(t, n);
+    #endif
 }
 
 void run4(vector<vector<string>>& l, string& input_filename, string& output_filename,
@@ -211,7 +250,6 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
     int n = l.size();
     vector<string> *t = &l[0];
     if(n==0) return;
-
     int savein = dup(0), saveout = dup(1);
     int input = 0, output = 1;
     bool input_opened = false, output_opened = false;
@@ -226,9 +264,9 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
     bool not_run = false;
     if (n==1 &&!t[0].empty()){
         if (strcmp(&t[0][0][0], "cd")==0){
-            cd_f(t[0]); not_run = true;
+            cd_f(&t[0][0], t[0].size()); not_run = true;
         }else if (strcmp(&t[0][0][0], "set")==0){
-            set_f(t[0]); not_run = true;
+            set_f(&t[0][0], t[0].size()); not_run = true;
         }
     }
     if (!not_run){
@@ -282,13 +320,7 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
         #endif
         //body
         if(i!=n) {
-            if(t[i].size()!=0){
-                #ifdef RUN_PROCESSES
-                auto it = Microsha_functions.find(t[i][0]);
-                if (it == Microsha_functions.end()) run_exec(t[i]);
-                else it->second(t[i]);
-                #endif
-            }
+            run_process(&t[0][0], t[0].size());
             exit(0);
         }
         //END_body
@@ -310,15 +342,15 @@ int main()
     {
         string f;
         f="cd"; f.push_back(0);
-        Microsha_functions.insert(pair<string, void (*)(vector<string>&)>(f, cd_f));
+        Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, cd_f));
         f = "pwd"; f.push_back(0);
-        Microsha_functions.insert(pair<string, void (*)(vector<string>&)>(f, pwd_f));
+        Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, pwd_f));
         f = "time"; f.push_back(0);
-        Microsha_functions.insert(pair<string, void (*)(vector<string>&)>(f, time_f));
+        Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, time_f));
         f = "echo"; f.push_back(0);
-        Microsha_functions.insert(pair<string, void (*)(vector<string>&)>(f, echo_f));
+        Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, echo_f));
         f = "set"; f.push_back(0);
-        Microsha_functions.insert(pair<string, void (*)(vector<string>&)>(f, set_f));
+        Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, set_f));
     }
     bool sudoflag = false;
     if (getuid()==0){
@@ -332,20 +364,34 @@ int main()
         string s;
         get_string(s);
         env_f(s);
-        /*cout<<s<<"\n";
-        vector<vector<string>> t;
-        string_to_words(s, t);
-        run3(t);*/
         vector<string> t;
         string_to_words1(s, t);
         string input_filename, output_filename;
-        bool input_flag, output_flag;
+        bool input_flag, output_flag, time_flag;
         vector<vector<string>> v;
-        if(parce(t, v, input_filename, output_filename, input_flag, output_flag)<0){
+        if(parce(t, v, input_filename, output_filename, input_flag, output_flag, time_flag)<0){
             fprintf(stderr, "<> mistake\n");
             continue;
         }
-        run4(v, input_filename, output_filename, input_flag, output_flag);
+        if (time_flag){
+            timeval tv1, tv2, dtv;
+            struct timezone tz;
+            gettimeofday(&tv1, &tz);
+            pid_t pid = fork();
+            if (pid == 0){
+                run4(v, input_filename, output_filename, input_flag, output_flag);
+                exit(0);
+            }
+            else{
+                waitpid(pid, NULL, WUNTRACED);
+                gettimeofday(&tv2, &tz);
+                rusage buf;
+                if (getrusage(RUSAGE_CHILDREN, &buf)<0) perror("getrusage");
+                timediff(tv1, tv2, dtv);
+                timeprint(dtv, buf);
+            }
+        }else
+            run4(v, input_filename, output_filename, input_flag, output_flag);
     }
     printf("\n");
 }
