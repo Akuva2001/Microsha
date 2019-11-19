@@ -10,6 +10,8 @@
 #include <time.h>
 #include <cstring>
 #include <sys/dir.h>
+#include <fcntl.h>
+#include <dirent.h>
 #include <map>
 using namespace std;
 //COLORS:
@@ -57,58 +59,34 @@ void env_f(string& s){
     #endif
     bool f = false;
     for(int i=0; i<s.size(); ++i){
-        if (s[i]=='\"'){
-            f = !f;
-            continue;
-        }
+        if (s[i]=='\"'){f = !f; continue;}
         if (f) continue;
         if(s[i]=='$'){
-            int save = i;
-            ++i;
+            int save = i; ++i;
             string w;
             bool t=false;
-            if(s[i]=='('){
-                ++i;
-                t=true;
-            }
+            if(s[i]=='('){ ++i; t=true;}
             for (; i<s.size() && ENV_NAME[s[i]]==1; ++i)
                 w.push_back(s[i]);
             w.push_back(0);
-            char* p = getenv(&w[0]);
-            if (p==NULL){
-                fprintf(stderr, "no env\n");
-                continue;
-            }
+            char symbol = 0, *p = getenv(&w[0]); 
+            if (p==NULL) p=&symbol;
             if (t) ++i;
             s.erase(save, i-save);
-            #ifdef ENV_F_DEBUG
-            printf("i-save = %d\n", i-save);
-            #endif
             const int len=strlen(p);
-            s.insert(save, p);
-            i = save+len-1;
+            s.insert(save, p); i = save+len-1;
         }
     }
 }
-
-
 void expand_links(string& w, vector<string>& t){//expand \* and \?
     bool f=true;
-    for (auto it:w)
-        if (it=='*' || it=='?') f=false;
-    if (f){
-        t.push_back(w);
-        return;
-    }
+    for (auto it:w) if (it=='*' || it=='?') f=false;
+    if (f){ t.push_back(w); return;}
     t.push_back(w);//dummy
 }
-
-void string_to_words(string& s, vector<vector<string>>& t){
+void string_to_words1(string& s, vector<string>& t){
     s.push_back(0);
     bool f=false;
-    int j=0;
-    vector<string> b;
-    t.push_back(b);
     string w;
     for(int i=0; s[i]!=0; ++i){
         if (s[i]=='\"'){
@@ -116,33 +94,49 @@ void string_to_words(string& s, vector<vector<string>>& t){
             w.push_back(s[i]);
             continue;
         }
-        if (f){
-            w.push_back(s[i]);
-            continue;
-        }
+        if (f) {w.push_back(s[i]); continue;}
         if (s[i]=='\t' || s[i]==' ' || s[i]=='\n'){
-            if (!w.empty()){
-                w.push_back(0);
-                if (strcmp("|", &w[0])==0){
-                    ++j;
-                    t.push_back(b);
-                } else expand_links(w, t[j]);
-            }
+            if (!w.empty()) {w.push_back(0); expand_links(w, t);}
             w.clear();
             continue;
         }
         w.push_back(s[i]);
     }
-    if (!w.empty()){
-        w.push_back(0);
-        if (strcmp("|", &w[0])==0){
-            ++j;
-            t.push_back(b);
-        } else expand_links(w, t[j]);
+    if (!w.empty()) {w.push_back(0); expand_links(w, t);}
+}
+int parce(vector<string>& t, vector<vector<string>>& v, string& input_filename, string& output_filename,
+ bool& input_flag, bool& output_flag){
+    int j=0;
+    input_flag = output_flag = false;
+    vector<string> p;
+    v.push_back(p);
+    bool conveyer_flag=false;
+    for (int i=0, n=t.size(); i<n; ++i){
+        if (strcmp(&t[i][0], "|") == 0) {
+            if (output_flag) return -1;
+            ++j; v.push_back(p); conveyer_flag = true; continue;
+        }
+        if (strcmp(&t[i][0], ">") == 0) {
+            if (!output_flag && i!=n-1){
+                ++i;
+                output_filename = t[i];
+                output_flag = true;
+                continue;
+            } return -1;
+        }
+        if (strcmp(&t[i][0], "<") == 0) {
+            if (!conveyer_flag && !output_flag && !input_flag && i!=n-1){
+                ++i;
+                input_filename = t[i];
+                input_flag = true;
+                continue;
+            } return -1;
+        }
+        v[j].push_back(t[i]);
     }
     #ifdef PRINT_WORDS
     int ddd=0;
-    for (auto itt: t){
+    for (auto itt: v){
         printf("%d)#", ddd);
         for(auto it : itt)
             printf("%s# ", &it[0]);
@@ -150,7 +144,8 @@ void string_to_words(string& s, vector<vector<string>>& t){
         ++ddd;
     }
     #endif
-}
+    return 0;
+} 
 
 void cd_f(vector<string>& t){
     //fprintf(stderr, "I'm cd_f\n");
@@ -178,15 +173,32 @@ void time_f(vector<string>& t){
 
 }
 void echo_f(vector<string>& t){
-
+    for(int n = t.size(), i=1; i<n; ++i)
+        printf("%s ", &t[i][0]);
+    printf("\n");
 }
 void set_f(vector<string>& t){
-
+    if (t.size()>2){
+        fprintf(stderr, "set: invalid argument\n");
+        return;
+    }
+    if (t.size()<2 || t[1].empty()) return;
+    bool f=false;
+    char* val = &t[1][0], *name=val;
+    for(;*val!=0;++val)
+        if(*val=='=') {*val=0; ++val; f=true; break;}
+    if(!f){
+        fprintf(stderr, "set: invalid argument\n");
+        return;
+    }
+    if(*val=='\"') {++val; t[1][t[1].length()-1] = 0;}
+    //printf("name= %s, val = %s\n", name, val);
+    if(setenv(name, val, 1)<0) perror("");
 }
 void run_exec(vector<string>& t){
     const int n = t.size();
     char **args = new char*[n+1];
-    for (int i=0; i<n; ++i)
+    for (int i=0; i<n; ++i) 
         args[i] = &t[i][0];
     args[n] = NULL;
     execvp(args[0], args);
@@ -194,84 +206,103 @@ void run_exec(vector<string>& t){
     delete[] args;
 }
 
-void run3(vector<vector<string>>& l){
+void run4(vector<vector<string>>& l, string& input_filename, string& output_filename,
+ bool input_flag, bool output_flag){
     int n = l.size();
     vector<string> *t = &l[0];
-    for(;n>0 && t[0].size()==0;--n, ++t);
-    if(n==0) return;
-    if (strcmp(&t[0][0][0], "cd")==0){
-        cd_f(t[0]);--n; ++t;
-    }
     if(n==0) return;
 
-    int *fd = new int[(n+1)<<1];
-    for (int i=1; i<n; ++i)
-        pipe(fd+(i<<1));
+    int savein = dup(0), saveout = dup(1);
     int input = 0, output = 1;
-    fd[0] = dup(0); fd[1] = 0; //imaginary pipe
-    fd[n<<1] = 1; fd[(n<<1)|1] = dup(1); //imaginary pipe
-    int i=0;
-    vector<pid_t> pids;
-    pid_t pid;
-    #ifdef PROCESS_DEBUG
-    for (int i=0; i<n+1; ++i)
-        printf("%d) in %d, out %d\n", i, fd[i<<1], fd[(i<<1)|1]);
-    #endif
-    for(;i<n;++i){
-        pid = fork();
-        if (pid==0){
-            input = fd[i<<1];
-            output = fd[((i+1)<<1)|1];
-            close(fd[(i<<1)|1]);
-            close(fd[(i+1)<<1]);
-            dup2(input, 0);
-            dup2(output, 1);
-            close(input);
-            close(output);
-            break;
-        }
-        else{
-            //if (i==n-1){ ++i; break;}
-            pids.push_back(pid);
+    bool input_opened = false, output_opened = false;
+    if (input_flag){
+        if ((input = open(&input_filename[0], O_RDONLY))<0) perror("");
+        else{dup2(input, 0); input_opened = true; close(input);}
+    }
+    if (output_flag){
+        if ((output = open(&output_filename[0], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH))<0) perror("");
+        else{ dup2(output, 1); close(output); output_opened = true;}
+    }
+    bool not_run = false;
+    if (n==1 &&!t[0].empty()){
+        if (strcmp(&t[0][0][0], "cd")==0){
+            cd_f(t[0]); not_run = true;
+        }else if (strcmp(&t[0][0][0], "set")==0){
+            set_f(t[0]); not_run = true;
         }
     }
-    delete[] fd;
-    #ifdef PROCESS_DEBUG
-    fprintf(stderr, "Created %d, in is %d, out is %d, me %d, p %d, ch %d\n", i, input, output, getpid(), getppid(),  pid);
-    #endif
-    #ifdef PIPE_DEBUG
-    if (i==0) {
-        write(1, "Hello\n", 6);
-        fprintf(stderr, "I'm %d, end io\n", i);
-    }
-    else if (i!=n){
-        char str[4096];
-        int l = read(0, str, 4096);
-        fprintf(stderr, "I'm %d, read %d sym: %s", i, l, str);
-        write(1, str, l);
-        fprintf(stderr, "I'm %d, end io\n", i);
-    }
-    #endif
-    //body
-    if(i!=n) {
-        if(t[i].size()!=0){
-            #ifdef RUN_PROCESSES
-            auto it = Microsha_functions.find(t[i][0]);
-            if (it == Microsha_functions.end()) run_exec(t[i]);
-            else it->second(t[i]);
-            #endif
+    if (!not_run){
+        int *fd = new int[(n+1)<<1];
+        for (int i=1; i<n; ++i)
+            pipe(fd+(i<<1));
+        int input = 0, output = 1;
+        fd[0] = dup(0); fd[1] = 0; //imaginary pipe
+        fd[n<<1] = 1; fd[(n<<1)|1] = dup(1); //imaginary pipe
+        int i=0;
+        vector<pid_t> pids;
+        pid_t pid;
+        #ifdef PROCESS_DEBUG
+        for (int i=0; i<n+1; ++i)
+            printf("%d) in %d, out %d\n", i, fd[i<<1], fd[(i<<1)|1]);
+        #endif
+        for(;i<n;++i){
+            pid = fork();
+            if (pid==0){
+                input = fd[i<<1];
+                output = fd[((i+1)<<1)|1];
+                close(fd[(i<<1)|1]);
+                close(fd[(i+1)<<1]);
+                dup2(input, 0);
+                dup2(output, 1);
+                close(input);
+                close(output);
+                break;
+            }
+            else{
+                //if (i==n-1){ ++i; break;}
+                pids.push_back(pid);
+            }
         }
-        exit(0);
+        delete[] fd;
+        #ifdef PROCESS_DEBUG
+        fprintf(stderr, "Created %d, in is %d, out is %d, me %d, p %d, ch %d\n", i, input, output, getpid(), getppid(),  pid);
+        #endif
+        #ifdef PIPE_DEBUG
+        if (i==0) {
+            write(1, "Hello\n", 6);
+            fprintf(stderr, "I'm %d, end io\n", i);
+        }
+        else if (i!=n){
+            char str[4096];
+            int l = read(0, str, 4096);
+            fprintf(stderr, "I'm %d, read %d sym: %s", i, l, str);
+            write(1, str, l);
+            fprintf(stderr, "I'm %d, end io\n", i);
+        }
+        #endif
+        //body
+        if(i!=n) {
+            if(t[i].size()!=0){
+                #ifdef RUN_PROCESSES
+                auto it = Microsha_functions.find(t[i][0]);
+                if (it == Microsha_functions.end()) run_exec(t[i]);
+                else it->second(t[i]);
+                #endif
+            }
+            exit(0);
+        }
+        //END_body
+        #ifdef PROCESS_DEBUG
+        printf("everithing is ok1\n");
+        #endif
+        for (auto it : pids)
+            waitpid(it, NULL, WUNTRACED);
+        #ifdef PROCESS_DEBUG
+        printf("everithing is ok2\n");
+        #endif
     }
-    //END_body
-    #ifdef PROCESS_DEBUG
-    printf("everithing is ok1\n");
-    #endif
-    for (auto it : pids)
-        waitpid(it, NULL, WUNTRACED);
-    #ifdef PROCESS_DEBUG
-    printf("everithing is ok2\n");
-    #endif
+    dup2(savein, 0); dup2(saveout, 1);
+    close(savein); close(saveout);
 }
 
 int main()
@@ -301,10 +332,20 @@ int main()
         string s;
         get_string(s);
         env_f(s);
-        //cout<<s<<"\n";
+        /*cout<<s<<"\n";
         vector<vector<string>> t;
         string_to_words(s, t);
-        run3(t);
+        run3(t);*/
+        vector<string> t;
+        string_to_words1(s, t);
+        string input_filename, output_filename;
+        bool input_flag, output_flag;
+        vector<vector<string>> v;
+        if(parce(t, v, input_filename, output_filename, input_flag, output_flag)<0){
+            fprintf(stderr, "<> mistake\n");
+            continue;
+        }
+        run4(v, input_filename, output_filename, input_flag, output_flag);
     }
     printf("\n");
 }
