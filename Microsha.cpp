@@ -15,6 +15,7 @@
 #include <map>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <regex>
 using namespace std;
 //COLORS:
 #define GREEN_BOLD   "\x1b[1;32m"
@@ -80,11 +81,84 @@ void env_f(string& s){
         }
     }
 }
-void expand_links(string& w, vector<string>& t){//expand \* and \?
-    bool f=true;
-    for (auto it:w) if (it=='*' || it=='?') f=false;
-    if (f){ t.push_back(w); return;}
-    t.push_back(w);//dummy
+
+
+void start_directory(char * dir_name, int length, vector<regex>& h, vector<string>& slash, vector<string>& t, int k){
+    DIR *dir = (dir_name[0]==0) ? opendir("./") : opendir(dir_name);
+    if (dir == NULL) {
+        perror("!!!opendir");
+        return;
+    }
+    for (auto rd = readdir(dir); rd != NULL; rd = readdir(dir)) {
+        if (rd->d_type == DT_REG && k==h.size()-1 && regex_match(rd->d_name, h[k])){
+            //printf("!!!");
+            //printf("  %s :  %s\n", dir_name, rd->d_name);
+            int len1 = strlen(rd->d_name);
+            char *new_dir_name = new char[length + len1 + 1];
+            strcpy(new_dir_name, dir_name);
+            strcat(new_dir_name, rd->d_name);
+            t.push_back(string(new_dir_name));
+            //printf("##%s##\n", new_dir_name);
+            delete[]new_dir_name;
+        }
+        else if (rd->d_type == DT_DIR && strcmp(rd->d_name, ".") != 0 && strcmp(rd->d_name, "..") != 0 && regex_match(rd->d_name, h[k])){
+            int len1 = strlen(rd->d_name);
+            char *new_dir_name = new char[length + len1 + 1 + slash[k].length()];
+            strcpy(new_dir_name, dir_name);
+            strcat(new_dir_name, rd->d_name);
+            strcat(new_dir_name, &slash[k][0]);
+            //printf("!!!");
+            //printf("%s :\n", new_dir_name);
+            if (k==h.size()-1) {t.push_back(string(new_dir_name));/*printf("##%s##\n", new_dir_name);*/}
+            else start_directory(new_dir_name, length+len1+((dir_name[0]==0)?0:1), h, slash, t, k+1);
+            delete[]new_dir_name;
+        }
+    }
+    closedir(dir);
+    return;
+}
+
+void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
+    int i=0;
+    string dir;
+    for(; w[i]!=0 && w[i]!='*' && w[i]!='+' && w[i]!='?'; ++i)
+        dir.push_back(w[i]);
+    if(w[i]==0){
+        t.push_back(w);
+        return;
+    }
+    dir.push_back(0);
+    //printf("dir #%s#\n", &dir[0]);
+    for(; i>=0 && w[i]!='/'; --i)
+        dir.pop_back();
+    dir.push_back(0);
+    //printf("dir #%s#\n", &dir[0]);
+    ++i;
+    vector<regex> h;
+    vector<string> slash, h1;
+    string p;
+    for (; w[i]!=0; ++i){
+        if (w[i]=='/'){
+            p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(p); p.clear();
+            for(;w[i]=='/';++i) p.push_back('/'); p.push_back(0); slash.push_back(p); p.clear();
+            if (w[i]==0) break; --i;
+            continue;
+        }
+        switch (w[i]){
+        case '.': p.push_back('\\'); p.push_back('.'); break;
+        case '*': p.push_back('.'); p.push_back('*'); break;
+        case '+': p.push_back('.'); p.push_back('+'); break;
+        case '?': p.push_back('.'); p.push_back('?'); break;
+        case '\\': p.push_back('\\'); p.push_back('\\'); break;
+        default: p.push_back(w[i]); break;
+        }
+    }
+    if (!p.empty()){
+        p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(p); p.clear();
+        p.push_back(0); slash.push_back(p); p.clear();
+    }
+    //for (int i=0; i<h1.size(); ++i) printf("%d)#%s# #%s#\n", i, &h1[i][0], &slash[i][0]);
+    start_directory(&dir[0], strlen(&dir[0]), h, slash, t, 0);
 }
 void string_to_words1(string& s, vector<string>& t){
     s.push_back(0);
