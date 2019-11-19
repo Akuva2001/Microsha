@@ -28,6 +28,7 @@ using namespace std;
 //#define PRINT_WORDS
 //#define PROCESS_DEBUG
 //#define PIPE_DEBUG
+//#define START_DIR_DEBUG
 
 //RUN
 #define RUN_PROCESSES
@@ -35,11 +36,9 @@ using namespace std;
 map<string, void (*)(string*, int)> Microsha_functions;
 
 void greeting(bool sudoflag){
-    char dir[4096];
-    getcwd(dir, 4096);
+    char dir[4096]; getcwd(dir, 4096);
     sudoflag?printf(GREEN_BOLD "%s!" COLOR_RESET, dir):printf(GREEN_BOLD "%s>" COLOR_RESET, dir);
 }
-
 void get_string(string &s){
     for(char c = getchar();!feof(stdin) && c!='\n';s.push_back(c), c = getchar());
 }
@@ -55,7 +54,6 @@ const int ENV_NAME[256] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 
  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
  0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-
 void env_f(string& s){
     #ifdef ENV_F_DEBUG
     cout<<"env_f string: "<<s<<'\n';
@@ -82,7 +80,6 @@ void env_f(string& s){
     }
 }
 
-
 void start_directory(char * dir_name, int length, vector<regex>& h, vector<string>& slash, vector<string>& t, int k){
     DIR *dir = (dir_name[0]==0) ? opendir("./") : opendir(dir_name);
     if (dir == NULL) {
@@ -96,6 +93,11 @@ void start_directory(char * dir_name, int length, vector<regex>& h, vector<strin
             strcpy(new_dir_name, dir_name);
             strcat(new_dir_name, rd->d_name);
             t.push_back(string(new_dir_name));
+            #ifdef START_DIR_DEBUG
+            printf("!!!");
+            printf("  %s :  %s\n", dir_name, rd->d_name);
+            printf("##%s##\n", new_dir_name);
+            #endif
             delete[]new_dir_name;
         }
         else if (rd->d_type == DT_DIR && strcmp(rd->d_name, ".") != 0 && strcmp(rd->d_name, "..") != 0 && regex_match(rd->d_name, h[k])){
@@ -104,35 +106,32 @@ void start_directory(char * dir_name, int length, vector<regex>& h, vector<strin
             strcpy(new_dir_name, dir_name);
             strcat(new_dir_name, rd->d_name);
             strcat(new_dir_name, &slash[k][0]);
-            if (k==h.size()-1) t.push_back(string(new_dir_name));
-            else start_directory(new_dir_name, length+len1+((dir_name[0]==0)?0:1), h, slash, t, k+1);
+            #ifdef START_DIR_DEBUG
+            printf("!!!");
+            printf("%s :\n", new_dir_name);
+            #endif
+            if (k==h.size()-1) {t.push_back(string(new_dir_name));/*printf("##%s##\n", new_dir_name);*/}
+            else start_directory(new_dir_name, strlen(new_dir_name), h, slash, t, k+1);
             delete[]new_dir_name;
         }
     }
     closedir(dir);
     return;
 }
-
 void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
     int i=0;
     string dir;
-    for(; w[i]!=0 && w[i]!='*' && w[i]!='+' && w[i]!='?'; ++i)
-        dir.push_back(w[i]);
-    if(w[i]==0){
-        t.push_back(w);
-        return;
-    }
+    for(; w[i]!=0 && w[i]!='*' && w[i]!='+' && w[i]!='?'; ++i) dir.push_back(w[i]);
+    if(w[i]==0){ t.push_back(w); return;}
     dir.push_back(0);
-    for(; i>=0 && w[i]!='/'; --i)
-        dir.pop_back();
-    dir.push_back(0);
-    ++i;
+    for(; i>=0 && w[i]!='/'; --i) dir.pop_back();
+    dir.push_back(0); ++i;
     vector<regex> h;
-    vector<string> slash;
+    vector<string> slash, h1;
     string p;
     for (; w[i]!=0; ++i){
         if (w[i]=='/'){
-            p.push_back(0); h.push_back(regex(&p[0])); p.clear();
+            p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(p); p.clear();
             for(;w[i]=='/';++i) p.push_back('/'); p.push_back(0); slash.push_back(p); p.clear();
             if (w[i]==0) break; --i;
             continue;
@@ -147,9 +146,13 @@ void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
         }
     }
     if (!p.empty()){
-        p.push_back(0); h.push_back(regex(&p[0])); p.clear();
+        p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(p); p.clear();
         p.push_back(0); slash.push_back(p); p.clear();
     }
+    #ifdef START_DIR_DEBUG
+    printf("dir #%s#\n", &dir[0]);
+    for (int i=0; i<h1.size(); ++i) printf("%d)#%s# #%s#\n", i, &h1[i][0], &slash[i][0]);
+    #endif
     start_directory(&dir[0], strlen(&dir[0]), h, slash, t, 0);
 }
 void string_to_words1(string& s, vector<string>& t){
@@ -172,14 +175,11 @@ void string_to_words1(string& s, vector<string>& t){
     }
     if (!w.empty()) {w.push_back(0); expand_links(w, t);}
 }
-int parce(vector<string>& t, vector<vector<string>>& v, string& input_filename, string& output_filename,
+int parce(vector<string>& t, vector<vector<string>>& v,string& input_filename, string& output_filename,
  bool& input_flag, bool& output_flag, bool& time_flag){
-    int j=0;
-    time_flag = input_flag = output_flag = false;
-    int i=0;
+    int j=0, i=0; time_flag = input_flag = output_flag = false;
     if (!t.empty() && !t[0].empty() && strcmp(&t[0][0], "time") == 0) {++i; time_flag = true;}
-    vector<string> p;
-    v.push_back(p);
+    vector<string> p; v.push_back(p);
     bool conveyer_flag=false;
     for (int n=t.size(); i<n; ++i){
         if (strcmp(&t[i][0], "|") == 0) {
@@ -218,63 +218,42 @@ int parce(vector<string>& t, vector<vector<string>>& v, string& input_filename, 
 } 
 
 void cd_f(string* t, int n){
-    //fprintf(stderr, "I'm cd_f\n");
-    if (n==1){
-        char home[] = "HOME";
-        chdir(getenv(home));
-        return;
-    }
-    if (n==2){
-        if (chdir(&t[1][0])<0) perror("");
-        return;
-    }
+    if (n==1){char home[] = "HOME"; chdir(getenv(home)); return;}
+    if (n==2){if (chdir(&t[1][0])<0) perror("");return;}
     fprintf(stderr, "cd: invalid argument\n");
 }
 void pwd_f(string* t, int n){
         if (n==1){
-        char dir[4096];
-        getcwd(dir, 4096);
+        char dir[4096]; getcwd(dir, 4096);
         printf("%s\n", dir);
         return;
     }
     fprintf(stderr, "pwd: invalid argument\n");
 }
 void echo_f(string* t, int n){
-    for(int i=1; i<n; ++i)
-        printf("%s ", &t[i][0]);
+    for(int i=1; i<n; ++i) printf("%s ", &t[i][0]);
     printf("\n");
 }
 void set_f(string* t, int n){
-    if (n>2){
-        fprintf(stderr, "set: invalid argument\n");
-        return;
-    }
+    if (n>2){fprintf(stderr, "set: invalid argument\n");return;}
     if (n<2 || t[1].empty()) return;
-    bool f=false;
-    char* val = &t[1][0], *name=val;
-    for(;*val!=0;++val)
-        if(*val=='=') {*val=0; ++val; f=true; break;}
-    if(!f){
-        fprintf(stderr, "set: invalid argument\n");
-        return;
-    }
+    bool f=false;char* val = &t[1][0], *name=val;
+    for(;*val!=0;++val) if(*val=='=') {*val=0; ++val; f=true; break;}
+    if(!f){fprintf(stderr, "set: invalid argument\n");return;}
     if(*val=='\"') {++val; t[1][t[1].length()-1] = 0;}
     //printf("name= %s, val = %s\n", name, val);
     if(setenv(name, val, 1)<0) perror("");
 }
 void run_exec(string* t, int n){
     char **args = new char*[n+1];
-    for (int i=0; i<n; ++i)
-        args[i] = &t[i][0];
-    args[n] = NULL;
-    execvp(args[0], args);
-    perror("");
+    for (int i=0; i<n; ++i) args[i] = &t[i][0]; args[n] = NULL;
+    execvp(args[0], args); perror("");
     delete[] args;
 }
 void timediff(timeval tv1, timeval tv2, timeval& dtv){
-    dtv.tv_sec= tv2.tv_sec -tv1.tv_sec;
+    dtv.tv_sec =tv2.tv_sec -tv1.tv_sec;
     dtv.tv_usec=tv2.tv_usec-tv1.tv_usec;
-    if(dtv.tv_usec<0) {--dtv.tv_sec; dtv.tv_usec+=1000000; }
+    if(dtv.tv_usec<0) {--dtv.tv_sec; dtv.tv_usec+=1000000;}
 }
 void timeprint(timeval dtv, rusage buf){
     printf("real\t%ldm%01ld,%03lds\nuser\t%ldm%01ld,%03lds\nsys\t%ldm%01ld,%03lds\n", dtv.tv_sec/60, dtv.tv_sec%60, dtv.tv_usec/1000,
@@ -287,18 +266,13 @@ void time_f(string* t, int n){
     struct timezone tz;
     gettimeofday(&tv1, &tz);
     pid_t pid = fork();
-    if (pid == 0){
-        ++t; --n;
-        run_process(t, n);
-        exit(0);
-    }
+    if (pid == 0){++t; --n; run_process(t, n); exit(0);}
     else{
+        rusage buf;
         waitpid(pid, NULL, WUNTRACED);
         gettimeofday(&tv2, &tz);
-        rusage buf;
         if (getrusage(RUSAGE_CHILDREN, &buf)<0) perror("getrusage");
-        timediff(tv1, tv2, dtv);
-        timeprint(dtv, buf);
+        timediff(tv1, tv2, dtv); timeprint(dtv, buf);
     }
 }
 
@@ -310,7 +284,6 @@ void run_process(string* t, int n){
     else it->second(t, n);
     #endif
 }
-
 void run4(vector<vector<string>>& l, string& input_filename, string& output_filename,
  bool input_flag, bool output_flag){
     int n = l.size();
@@ -337,14 +310,11 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
     }
     if (!not_run){
         int *fd = new int[(n+1)<<1];
-        for (int i=1; i<n; ++i)
-            pipe(fd+(i<<1));
+        for (int i=1; i<n; ++i) pipe(fd+(i<<1));
         int input = 0, output = 1;
         fd[0] = dup(0); fd[1] = 0; //imaginary pipe
         fd[n<<1] = 1; fd[(n<<1)|1] = dup(1); //imaginary pipe
-        int i=0;
-        vector<pid_t> pids;
-        pid_t pid;
+        int i=0; vector<pid_t> pids; pid_t pid;
         #ifdef PROCESS_DEBUG
         for (int i=0; i<n+1; ++i)
             printf("%d) in %d, out %d\n", i, fd[i<<1], fd[(i<<1)|1]);
@@ -352,20 +322,13 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
         for(;i<n;++i){
             pid = fork();
             if (pid==0){
-                input = fd[i<<1];
-                output = fd[((i+1)<<1)|1];
-                close(fd[(i<<1)|1]);
-                close(fd[(i+1)<<1]);
-                dup2(input, 0);
-                dup2(output, 1);
-                close(input);
-                close(output);
+                input = fd[i<<1]; output = fd[((i+1)<<1)|1];
+                close(fd[(i<<1)|1]);close(fd[(i+1)<<1]);
+                dup2(input, 0);dup2(output, 1);
+                close(input);close(output);
                 break;
             }
-            else{
-                //if (i==n-1){ ++i; break;}
-                pids.push_back(pid);
-            }
+            else pids.push_back(pid);
         }
         delete[] fd;
         #ifdef PROCESS_DEBUG
@@ -375,8 +338,7 @@ void run4(vector<vector<string>>& l, string& input_filename, string& output_file
         if (i==0) {
             write(1, "Hello\n", 6);
             fprintf(stderr, "I'm %d, end io\n", i);
-        }
-        else if (i!=n){
+        } else if (i!=n){
             char str[4096];
             int l = read(0, str, 4096);
             fprintf(stderr, "I'm %d, read %d sym: %s", i, l, str);
@@ -444,20 +406,14 @@ int main()
             struct timezone tz;
             gettimeofday(&tv1, &tz);
             pid_t pid = fork();
-            if (pid == 0){
-                run4(v, input_filename, output_filename, input_flag, output_flag);
-                exit(0);
-            }
+            if (pid == 0){run4(v, input_filename, output_filename, input_flag, output_flag);exit(0);}
             else{
-                waitpid(pid, NULL, WUNTRACED);
+                rusage buf; waitpid(pid, NULL, WUNTRACED);
                 gettimeofday(&tv2, &tz);
-                rusage buf;
                 if (getrusage(RUSAGE_CHILDREN, &buf)<0) perror("getrusage");
-                timediff(tv1, tv2, dtv);
-                timeprint(dtv, buf);
+                timediff(tv1, tv2, dtv); timeprint(dtv, buf);
             }
-        }else
-            run4(v, input_filename, output_filename, input_flag, output_flag);
+        }else run4(v, input_filename, output_filename, input_flag, output_flag);
     }
     printf("\n");
 }
