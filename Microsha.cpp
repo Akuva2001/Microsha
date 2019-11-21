@@ -79,39 +79,34 @@ void env_f(string& s){
         }
     }
 }
-void start_directory(char * dir_name, int length, vector<regex>& h,  vector<string>& h1, vector<bool>& flags, vector<string>& slash, vector<string>& t, int k){
-    DIR *dir = (dir_name[0]==0) ? opendir("./") : opendir(dir_name);
+void start_directory(string& dir_name, vector<regex>& h,  vector<string>& h1, vector<bool>& flags, vector<string>& slash, vector<string>& t, int k){
+    DIR *dir = dir_name.empty() ? opendir("./") : opendir(dir_name.c_str());
     if (dir == NULL) {
-        perror("!!!opendir");
+        //perror("!!!opendir");
         return;
     }
+    if(k==h.size()){closedir(dir); dir_name.push_back(0); t.push_back(dir_name); return;}
     for (auto rd = readdir(dir); rd != NULL; rd = readdir(dir)) {
-        if (rd->d_type == DT_REG && k==h.size()-1 && regex_match(rd->d_name, h[k])){
-            int len1 = strlen(rd->d_name);
-            char *new_dir_name = new char[length + len1 + 1];
-            strcpy(new_dir_name, dir_name);
-            strcat(new_dir_name, rd->d_name);
-            t.push_back(string(new_dir_name));
+        //printf("!!!!%s#\n", rd->d_name);
+        if (slash[k].empty() && rd->d_type == DT_REG && k==h.size()-1 && regex_match(rd->d_name, h[k])){
+            string new_dir_name(dir_name + string(rd->d_name));
+            new_dir_name.push_back(0);
+            t.push_back(new_dir_name);
             #ifdef START_DIR_DEBUG
-            printf("!!!");
-            printf("  %s :  %s\n", dir_name, rd->d_name);
-            printf("##%s##\n", new_dir_name);
+            printf("!!!  %s :  %s\n", dir_name.c_str(), rd->d_name);
+            printf("##%s##\n", new_dir_name.c_str());
             #endif
-            delete[]new_dir_name;
         }
         else if (rd->d_type == DT_DIR && (strcmp(rd->d_name, ".") != 0 && strcmp(rd->d_name, "..") != 0 || flags[k] && strcmp(rd->d_name, &h1[k][0]) == 0) && regex_match(rd->d_name, h[k])){
-            int len1 = strlen(rd->d_name);
-            char *new_dir_name = new char[length + len1 + 1 + slash[k].length()];
-            strcpy(new_dir_name, dir_name);
-            strcat(new_dir_name, rd->d_name);
-            strcat(new_dir_name, &slash[k][0]);
+            int m=k+1;
+            string new_dir_name(dir_name + string(rd->d_name) + slash[k]);
+            for(int n = h.size()-1; m<n && flags[m]; ++m)
+                new_dir_name += h1[m] + slash[m];
             #ifdef START_DIR_DEBUG
-            printf("!!!");
-            printf("%s :\n", new_dir_name);
+            printf("!!!%s :\n", new_dir_name.c_str());
             #endif
-            if (k==h.size()-1) {t.push_back(string(new_dir_name));/*printf("##%s##\n", new_dir_name);*/}
-            else start_directory(new_dir_name, strlen(new_dir_name), h, h1, flags, slash, t, k+1);
-            delete[]new_dir_name;
+            if (k==h.size()-1) {start_directory(new_dir_name, h, h1, flags, slash, t, k+1);}
+            else start_directory(new_dir_name, h, h1, flags, slash, t, m);
         }
     }
     closedir(dir);
@@ -124,7 +119,7 @@ void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
     if(w[i]==0){ t.push_back(w); return;}
     dir.push_back(0);
     for(; i>=0 && w[i]!='/'; --i) dir.pop_back();
-    dir.push_back(0); ++i;
+    ++i;
     vector<regex> h;
     vector<string> slash, h1;
     vector<bool> flags;
@@ -132,8 +127,8 @@ void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
     bool fl = true;
     for (; w[i]!=0; ++i){
         if (w[i]=='/'){
-            p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(l); l.clear(); flags.push_back(fl); fl = true; p.clear();
-            for(;w[i]=='/';++i) p.push_back('/'); p.push_back(0); slash.push_back(p); p.clear();
+            h.push_back(regex(p.c_str())); h1.push_back(l); l.clear(); flags.push_back(fl); fl = true; p.clear();
+            for(;w[i]=='/';++i) p.push_back('/'); slash.push_back(p); p.clear();
             if (w[i]==0) break; --i;
             continue;
         }
@@ -148,14 +143,16 @@ void expand_links(string& w, vector<string>& t){//expand \* and \? anf \+
         l.push_back(w[i]);
     }
     if (!p.empty()){
-        p.push_back(0); h.push_back(regex(&p[0])); h1.push_back(l); l.clear(); flags.push_back(fl); p.clear();
-        p.push_back(0); slash.push_back(p); p.clear();
+        h.push_back(regex(p.c_str())); h1.push_back(l); l.clear(); flags.push_back(fl); p.clear();
+        slash.push_back(p); p.clear();
     }
     #ifdef START_DIR_DEBUG
     printf("dir #%s#\n", &dir[0]);
-    for (int i=0; i<h1.size(); ++i) printf("%d)#%s# #%s# %d\n", i, &h1[i][0], &slash[i][0], (int)flags[i]);
+    for (int i=0; i<h1.size(); ++i) printf("%d)#%s# #%s# %s\n", i, h1[i].c_str(), slash[i].c_str(), flags[i]?"flags_true":"flags_false");
     #endif
-    start_directory(&dir[0], strlen(&dir[0]), h, h1, flags, slash, t, 0);
+    int save_size = t.size();
+    start_directory(dir, h, h1, flags, slash, t, 0);
+    if (t.size() == save_size) t.push_back(w);
 }
 void string_to_words1(string& s, vector<string>& t){
     s.push_back(0);
