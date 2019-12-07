@@ -16,6 +16,7 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <regex>
+#include <signal.h>
 using namespace std;
 //COLORS:
 #define GREEN_BOLD   "\x1b[1;32m"
@@ -32,6 +33,12 @@ using namespace std;
 
 //RUN
 #define RUN_PROCESSES
+//vector<pid_t> pids;
+pid_t mainpid;
+void myint(int sig){
+    if (getpid() != mainpid) exit(0);
+    printf("\n");
+}
 
 map<string, void (*)(string*, int)> Microsha_functions;
 
@@ -380,6 +387,8 @@ int main()
         Microsha_functions.insert(pair<string, void (*)(string*, int)>(f, set_f));
     }
     bool sudoflag = false;
+    mainpid = getpid();
+    signal(SIGINT, myint);
     if (getuid()==0){
         #ifdef ROOT_DEBUG
         cout<<"root\n";
